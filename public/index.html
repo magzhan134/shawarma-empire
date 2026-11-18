@@ -23,39 +23,18 @@
     <main>
       <section id="bizScreen">
         <button id="eventBanner" class="event-banner" hidden><b>⚡ Мага звонит: ситуация</b><span>Нужно твоё решение</span></button>
+        <div id="sceneTabs" class="scene-tabs"></div>
         <div id="tapBtn" class="scene day" role="button" aria-label="Обслужить клиента">
-          <svg class="stage" viewBox="0 0 360 190" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
-            <g class="stars" fill="#fff"><circle cx="210" cy="24" r="1.2"/><circle cx="262" cy="46" r="1"/><circle cx="318" cy="20" r="1.3"/><circle cx="342" cy="62" r="1"/><circle cx="236" cy="70" r=".9"/><circle cx="296" cy="84" r="1.1"/></g>
-            <circle class="sun" cx="318" cy="36" r="15"/>
-            <g class="city" fill="#000" opacity=".18"><rect x="196" y="96" width="30" height="66"/><rect x="230" y="78" width="24" height="84"/><rect x="258" y="104" width="36" height="58"/><rect x="298" y="88" width="26" height="74"/><rect x="328" y="110" width="32" height="52"/></g>
-            <rect x="0" y="160" width="360" height="30" fill="#2b2622"/><rect x="0" y="160" width="360" height="3" fill="#4a4038"/>
-            <rect x="18" y="60" width="154" height="102" fill="#3a2a1c"/>
-            <rect x="26" y="70" width="138" height="56" rx="4" fill="#241a12"/>
-            <g class="lamp"><circle cx="46" cy="76" r="22" fill="#ffb22e" opacity=".22"/><circle cx="46" cy="76" r="4" fill="#ffe2a0"/></g>
-            <rect x="158" y="76" width="6" height="46" rx="2" fill="#ff5a36" class="heat"/>
-            <line x1="142" y1="68" x2="142" y2="126" stroke="#c9c2b8" stroke-width="3"/>
-            <path d="M129 78h26l-5 42h-16z" fill="#a5562a"/><path d="M133 86h18M134 96h16M135 106h14" stroke="#7a3a18" stroke-width="2.5"/>
-            <g class="maga">
-              <rect x="58" y="98" width="44" height="34" rx="9" fill="#f3ede2"/>
-              <rect x="69" y="106" width="22" height="26" rx="3" fill="#ffb22e"/>
-              <line x1="62" y1="104" x2="52" y2="122" stroke="#c98f62" stroke-width="7" stroke-linecap="round"/>
-              <g id="magaArm"><line x1="98" y1="104" x2="120" y2="108" stroke="#c98f62" stroke-width="7" stroke-linecap="round"/><line x1="121" y1="107" x2="136" y2="96" stroke="#e6e1d8" stroke-width="3.5" stroke-linecap="round"/></g>
-              <circle cx="80" cy="80" r="15" fill="#c98f62"/>
-              <path d="M65 80q0 22 15 24q15-2 15-24q-6 8-15 8t-15-8z" fill="#1d1410"/>
-              <path d="M75 92q5 4 10 0" stroke="#f7efe4" stroke-width="1.6" fill="none" stroke-linecap="round"/>
-              <circle cx="74" cy="77" r="1.9" fill="#1d1410"/><circle cx="86" cy="77" r="1.9" fill="#1d1410"/>
-              <path d="M70 72l7 1M83 73l7-1" stroke="#1d1410" stroke-width="2" stroke-linecap="round"/>
-              <ellipse cx="80" cy="60" rx="16" ry="9" fill="#fff"/><rect x="66" y="60" width="28" height="9" rx="3" fill="#fff"/>
-            </g>
-            <rect x="12" y="126" width="168" height="8" rx="2" fill="#8a5a2a"/><rect x="16" y="134" width="160" height="28" fill="#5a3a1e"/>
-            <g><rect x="8" y="46" width="22" height="18" fill="#ff5a36"/><rect x="30" y="46" width="22" height="18" fill="#ffb22e"/><rect x="52" y="46" width="22" height="18" fill="#ff5a36"/><rect x="74" y="46" width="22" height="18" fill="#ffb22e"/><rect x="96" y="46" width="22" height="18" fill="#ff5a36"/><rect x="118" y="46" width="22" height="18" fill="#ffb22e"/><rect x="140" y="46" width="22" height="18" fill="#ff5a36"/><rect x="162" y="46" width="20" height="18" fill="#ffb22e"/></g>
-            <rect x="36" y="18" width="118" height="24" rx="6" fill="#201610" stroke="#ffb22e" stroke-width="1.5"/>
-            <text x="95" y="34.5" text-anchor="middle" font-size="12" font-weight="800" fill="#ffb22e" font-family="system-ui,sans-serif">ДОНЕР У МАГИ</text>
-          </svg>
+          <div id="stageWrap"></div>
           <div id="custLayer"></div>
           <div id="bubble" class="bubble"></div>
         </div>
-        <div class="tap-hint"><span id="dayLabel">День 1</span> · клиентов сегодня <b id="custToday">0</b> · тап <b id="tapVal">1</b> ₸</div>
+        <div class="dayrow">
+          <div><b id="dayLabel">День 1</b> <span id="clock" class="muted">06:00</span></div>
+          <div id="speedBox" class="speed"></div>
+        </div>
+        <div class="tap-hint">клиентов за день <b id="custToday">0</b> · выручка <b id="revToday">0</b> ₸ · тап <b id="tapVal">1</b> ₸</div>
+        <div id="staffList" class="staff"></div>
         <div class="pricecard">
           <div class="row">
             <div><div class="muted">Цена донера</div><div class="pv"><span id="priceVal">1500</span> ₸</div></div>

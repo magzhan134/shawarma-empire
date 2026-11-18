@@ -70,9 +70,9 @@ test('покупка: нельзя без денег и нельзя закры�
 
 test('рубежи удваивают доход точки', () => {
   const b = G.BIZ.kiosk;
-  near(G.bizIncome(b, 9), b.baseIncome * 9);
-  near(G.bizIncome(b, 10), b.baseIncome * 10 * 2);
-  near(G.bizIncome(b, 25), b.baseIncome * 25 * 4);
+  near(G.bizIncome(b, 24), b.baseIncome * 24);
+  near(G.bizIncome(b, 25), b.baseIncome * 25 * 2);
+  near(G.bizIncome(b, 50), b.baseIncome * 50 * 4);
 });
 
 test('престиж сбрасывает забег и даёт постоянный множитель', () => {
@@ -136,23 +136,38 @@ test('подпись initData: верная проходит, подделка �
   assert.equal(verifyInitData(data, token, 86400, now + 90000), null);
 });
 
-test('клиенты: считаются за день, сбрасываются в полночь по Казахстану, на деньги не влияют', () => {
-  const day = 86400e3, t0 = 100 * day - G.TZ_OFFSET_H * 3600e3; // полночь в Казахстане
-  const s = mk(t0);
-  G.accrue(s, t0 + 100_000);
-  G.applyTaps(s, 5, t0 + 100_000);
-  assert.ok(Math.abs(s.cust.n - (G.customerRate(s) * 100 + 5)) < 1e-6);
-  assert.equal(G.bizDay(s, t0 + 100_000), 1);
-  const before = s.cust.total;
-  G.applyTaps(s, 3, t0 + day + 1000);
-  assert.equal(s.cust.n, 3);
-  assert.equal(s.cust.total, before + 3);
-  assert.equal(G.bizDay(s, t0 + day + 1000), 2);
-  const old = mk(t0); delete old.cust; // сохранение из прошлой версии
-  G.accrue(old, t0 + 1000);
-  assert.ok(old.cust.n > 0);
-  assert.equal(G.dayPart(t0), 'night');
-  assert.equal(G.dayPart(t0 + 12 * 3600e3), 'day');
+test('игровые сутки: клиенты и выручка считаются по дням, итог закрытого дня сохраняется', () => {
+  const s = mk(0);
+  assert.equal(G.gameDay(s), 1);
+  assert.deepEqual(G.gameClock(s), { h: 6, m: 0 });
+  assert.equal(G.dayPart(s), 'dawn');
+  const half = G.GAME_DAY_MS / 2;
+  G.accrue(s, half);
+  assert.deepEqual(G.gameClock(s), { h: 18, m: 0 });
+  assert.equal(G.dayPart(s), 'dusk');
+  const rate = G.customerRate(s), inc = G.baseIncome(s);
+  near(s.cust.n, (rate * half) / 1000);
+  G.accrue(s, half * 3); // прошли конец первых суток и половину вторых... и ещё сутки
+  assert.equal(G.gameDay(s), 2);
+  assert.equal(s.g.last.day, 1);
+  near(s.g.last.rev, (inc * G.GAME_DAY_MS) / 1000);
+  near(s.cust.n, (rate * half) / 1000);
+  // скорость 2x пока игрок в игре: сутки проходят вдвое быстрее
+  s.g.speed = 2; s.g.activeUntil = s.ts + G.GAME_DAY_MS;
+  G.accrue(s, s.ts + half);
+  assert.equal(G.gameDay(s), 3);
+  // старое сохранение мигрирует
+  const old = mk(0); old.v = 2; delete old.g; old.manager = true; old.biz.kiosk = 500;
+  assert.equal(G.migrate(old, 5), true);
+  assert.deepEqual([old.v, old.biz.kiosk, old.manager, old.g.speed], [G.STATE_VERSION, 1, true, 1]);
+  assert.equal(G.migrate(old, 6), false);
+});
+
+test('работники появляются с ростом уровня точки', () => {
+  assert.deepEqual(G.staffFor('kiosk', 1).map((w) => w.name), ['Мага']);
+  assert.deepEqual(G.staffFor('kiosk', 25).map((w) => w.name), ['Мага', 'Рустам']);
+  assert.equal(G.staffFor('cafe', 0).length, 0);
+  for (const b of G.BUSINESSES) assert.ok(G.STAFF[b.id]?.length >= 2, b.id);
 });
 
 test('старт: капитал 500 тыс, без выбора точки и аппарата дохода нет', () => {

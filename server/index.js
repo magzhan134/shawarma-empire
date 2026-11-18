@@ -92,10 +92,11 @@ async function setupTelegram(tg, cfg, service) {
   const me = await retry('Telegram getMe', () => tg.call('getMe', {}, 30000));
   service.setBotUsername(me.username);
   if (cfg.tgMode === 'webhook') {
-    await retry('Telegram setWebhook', () => tg.call('setWebhook', { url: cfg.webappUrl + '/tg/webhook', secret_token: cfg.webhookSecret, allowed_updates: ['message', 'pre_checkout_query'] }, 30000));
+    await retry('Telegram setWebhook', () => tg.call('setWebhook', { url: cfg.webappUrl + '/tg/webhook', secret_token: cfg.webhookSecret, allowed_updates: ['message', 'pre_checkout_query', 'callback_query'] }, 30000));
   }
   if (cfg.webappUrl) await tg.call('setChatMenuButton', { menu_button: { type: 'web_app', text: 'Играть', web_app: { url: cfg.webappUrl + '/' } } }, 30000).catch((e) => console.error('menu button:', e.message));
   else console.warn('WEBAPP_URL не задан: кнопка «Играть» в боте не появится.');
+  await service.registerCommands().catch((e) => console.error('commands:', e.message));
   if (cfg.tgMode === 'polling') tg.startPolling(service.handleUpdate);
   console.log(`Бот @${me.username} запущен (${cfg.tgMode === 'webhook' ? 'вебхук' : 'опрос'})`);
 }

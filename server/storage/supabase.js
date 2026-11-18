@@ -1,6 +1,6 @@
 // Хранилище в Supabase через REST (PostgREST), без SDK. Нужен service-ключ: он только на сервере.
 export function createSupabaseStorage({ url, key }) {
-  const base = url.replace(/\/$/, '') + '/rest/v1';
+  const base = url.trim().replace(/\/+$/, '').replace(/\/rest\/v1$/, '') + '/rest/v1';
   const H = { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' };
 
   async function req(method, path, { body, headers } = {}) {
@@ -42,6 +42,12 @@ export function createSupabaseStorage({ url, key }) {
         if (e.status === 409) return false; // такой платёж уже записан
         throw e;
       }
+    },
+    async listUserIds(after, limit) {
+      return (await json(await req('GET', `/users?select=id&id=gt.${Number(after) || 0}&order=id.asc&limit=${limit}`))).map((r) => Number(r.id));
+    },
+    async recentPurchases(limit) {
+      return json(await req('GET', `/purchases?select=*&order=created_at.desc&limit=${limit}`));
     },
     async getPurchase(chargeId) {
       const rows = await json(await req('GET', `/purchases?charge_id=eq.${encodeURIComponent(chargeId)}&select=*`));

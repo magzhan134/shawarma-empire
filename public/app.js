@@ -1,4 +1,5 @@
 import * as G from '/shared/game.js';
+import { SCENES, sceneSvg, createCrowd, LINES } from '/scenes.js';
 
 const tg = window.Telegram?.WebApp;
 const $ = (id) => document.getElementById(id);
@@ -14,7 +15,7 @@ try { devId = localStorage.getItem('devId') || String(Math.floor(Math.random() *
 
 const ERR = {
   money: 'Не хватает денег', locked: 'Сначала открой предыдущую точку', slow_down: 'Слишком быстро, подожди пару секунд',
-  owned: 'Это у тебя уже есть', already: 'Точка уже выбрана', bad_setup: 'Выбери вариант из списка', bad_price: 'Неверная цена', no_hints: 'Советы закончились', claimed: 'Награда уже получена', not_enough: 'Пока рано продавать сеть',
+  owned: 'Это у тебя уже есть', need_turbo: 'Скорость 5x открывается в магазине', bad_name: 'Имя: от 2 до 20 букв или цифр', already: 'Точка уже выбрана', bad_setup: 'Выбери вариант из списка', bad_price: 'Неверная цена', no_hints: 'Советы закончились', claimed: 'Награда уже получена', not_enough: 'Пока рано продавать сеть',
   network: 'Нет связи с сервером', no_city: 'Сначала выбери город',
 };
 
@@ -75,11 +76,14 @@ $('modal').addEventListener('click', (e) => {
 function renderHud() {
   const t = now();
   $('money').textContent = G.fmt(S.money);
-  $('rate').textContent = G.fmtRate(G.incomeAt(S, t));
+  $('rate').textContent = G.fmtRate(G.incomeAt(S, t) * G.speedAt(S, t)) + (G.speedAt(S, t) > 1 ? ` (${G.speedAt(S, t)}x)` : '');
   $('tapVal').textContent = '+' + G.fmtRate(G.tapValue(S, t));
-  const PART = { dawn: 'утро', day: 'день', dusk: 'вечер', night: 'ночь' };
-  $('dayLabel').textContent = `День ${G.bizDay(S, t)} · ${PART[G.dayPart(t)]}`;
+  const ck = G.gameClock(S);
+  $('dayLabel').textContent = `День ${G.gameDay(S)}`;
+  $('clock').textContent = `${String(ck.h).padStart(2, '0')}:${String(ck.m).padStart(2, '0')}`;
   $('custToday').textContent = G.fmt(S.cust?.n || 0);
+  $('revToday').textContent = G.fmt(S.cust?.rev || 0);
+  renderSpeed();
   const pi = G.priceInfo(S);
   $('priceVal').textContent = S.price;
   $('pDemand').textContent = Math.round(pi.demand * 100) + '%';
@@ -158,9 +162,9 @@ $('buyMode').addEventListener('click', (e) => {
   updateBiz();
 });
 
-// ---------- сцена: Мага, клиенты, реплики ----------
+// ---------- сцены заведений, работники, реплики ----------
 const SAY = {
-  idle: ['Заходи, брат, донер свежий!', 'Мясо свежее, как утро в горах.', 'Соус мой, рецепт секретный.', 'Клиент сытый — Мага довольный.', 'Очередь идёт — душа поёт.', 'Режем тонко, зарабатываем толсто.', 'Пятнадцать лет у гриля, брат.'],
+  idle: LINES.kiosk.concat(['Очередь идёт — душа поёт.', 'Пятнадцать лет у гриля, брат.']),
   night: ['Ночная смена — самая вкусная.', 'Город спит, гриль работает.'],
   buy: ['Вот это по-хозяйски!', 'Расширяемся, брат!', 'Новый уровень — новый вкус.'],
   event: ['Брат, тут ситуация. Нужна твоя голова.'],
@@ -169,66 +173,122 @@ const SAY = {
   bad: ['Эх… В следующий раз спроси Магу.'],
   prestige: ['Продали сеть! Начинаем заново, но уже умнее.'],
   back: ['О, хозяин вернулся! Касса ждёт.'],
+  dayEnd: ['Смена закрыта, считаем кассу.', 'Ещё один день позади, брат.'],
 };
 let bubbleTimer, lastSay = 0;
-function say(kind, force = true) {
-  if (!force && Date.now() - lastSay < 12000) return;
-  const list = SAY[kind]; if (!list) return;
+function bubble(text) {
   const b = $('bubble');
-  b.textContent = list[Math.floor(Math.random() * list.length)];
+  b.textContent = text;
   b.classList.add('on'); lastSay = Date.now();
   clearTimeout(bubbleTimer); bubbleTimer = setTimeout(() => b.classList.remove('on'), 2800);
 }
+function say(kind, force = true) {
+  if (!force && Date.now() - lastSay < 12000) return;
+  const list = SAY[kind]; if (!list) return;
+  // Мага говорит в ларьке и в «Мире»; в остальных заведениях реплики Маги приходят как звонок
+  const prefix = scene === 'kiosk' || scene === 'world' ? '' : 'Мага: ';
+  bubble(prefix + list[Math.floor(Math.random() * list.length)]);
+}
+function sayLocal() {
+  const staff = G.staffFor(scene, G.lvl(S, scene));
+  const who = staff[Math.floor(Math.random() * staff.length)];
+  const line = LINES[scene][Math.floor(Math.random() * LINES[scene].length)];
+  bubble(scene === 'kiosk' ? line : `${who ? who.name + ': ' : ''}${line}`);
+}
 
-const SKIN = ['#f1c9a5', '#e0ac7e', '#c98f62', '#a9744f', '#8a5a3c'], SHIRT = ['#6fb6ff', '#5fd88f', '#ff8a4a', '#d9a4ff', '#ffd27a', '#ff6f91', '#9aa7b8', '#f7efe4'], HAIR = ['#1d1410', '#3a2a1c', '#6b4a2a', '#c9a45a', '#555'];
-const pick = (a) => a[Math.floor(Math.random() * a.length)];
-const queue = []; // клиенты, которые идут к прилавку или ждут
-const slotX = (i) => 52 + i * 10.5;
-function spawnCustomer() {
-  if (queue.length >= 4) return;
-  const el = document.createElement('div');
-  el.className = 'cust'; el.style.left = '104%';
-  el.innerHTML = `<svg viewBox="0 0 28 54"><rect x="8" y="38" width="5" height="15" rx="2.5" fill="#2b2b3a"/><rect x="15" y="38" width="5" height="15" rx="2.5" fill="#2b2b3a"/><rect x="5" y="18" width="18" height="23" rx="7" fill="${pick(SHIRT)}"/><circle cx="14" cy="9.5" r="8" fill="${pick(SKIN)}"/><path d="M6 9.5a8 8 0 0116 0z" fill="${pick(HAIR)}"/></svg>`;
-  $('custLayer').appendChild(el);
-  const c = { el };
-  queue.push(c);
-  requestAnimationFrame(() => requestAnimationFrame(() => { el.style.left = slotX(queue.indexOf(c)) + '%'; }));
-  c.t = setTimeout(() => el.classList.add('wait'), 1150);
+let scene = 'kiosk', sceneKey = '';
+try { scene = localStorage.getItem('scene') || 'kiosk'; } catch {}
+const crowd = createCrowd($('custLayer'), () => {
+  const arm = document.getElementById('magaArm');
+  if (arm) { arm.classList.remove('slice'); void arm.getBoundingClientRect(); arm.classList.add('slice'); }
+});
+const opened = () => G.BUSINESSES.filter((b) => G.lvl(S, b.id) > 0).map((b) => b.id);
+function renderScene(force = false) {
+  if (!opened().includes(scene)) scene = 'kiosk';
+  const level = G.lvl(S, scene);
+  const staffN = G.staffFor(scene, level).length;
+  const key = `${scene}:${staffN}`;
+  if (key !== sceneKey || force) {
+    sceneKey = key;
+    $('stageWrap').innerHTML = sceneSvg(scene, level);
+    crowd.use(scene);
+    for (let i = 0; i < 2; i++) setTimeout(() => crowd.spawn(), 200 + i * 600);
+    $('tapBtn').dataset.layout = SCENES[scene].layout;
+  }
+  const tabs = G.BUSINESSES.filter((b, i) => G.lvl(S, b.id) > 0 || (i > 0 && G.lvl(S, G.BUSINESSES[i - 1].id) > 0));
+  const html = tabs.map((b) => {
+    const open = G.lvl(S, b.id) > 0;
+    return `<button data-scene="${b.id}" class="${b.id === scene ? 'on' : ''}" ${open ? '' : 'disabled'}><i>${open ? b.emoji : '🔒'}</i>${SCENES[b.id].short}</button>`;
+  }).join('');
+  if ($('sceneTabs').dataset.h !== html) { $('sceneTabs').dataset.h = html; $('sceneTabs').innerHTML = html; }
+  const all = G.STAFF[scene] || [];
+  const hired = G.staffFor(scene, level);
+  const next = all.find((w) => level < w.at);
+  const shtml = `<div class="staff-title">Работники · ${G.BIZ[scene].name}</div>` + hired.map((w) => `<span class="chip">${w.look === 'maga' ? '🧔🏽' : '🧑'} <b>${esc(w.name)}</b> ${esc(w.role)}</span>`).join('')
+    + (next ? `<span class="chip next">🔒 ${esc(next.name)}, ${esc(next.role)} — с уровня ${next.at}</span>` : '');
+  if ($('staffList').dataset.h !== shtml) { $('staffList').dataset.h = shtml; $('staffList').innerHTML = shtml; }
 }
-function serveCustomer() {
-  const c = queue.shift();
-  if (!c) return false;
-  clearTimeout(c.t);
-  c.el.classList.remove('wait'); c.el.classList.add('leave');
-  c.el.insertAdjacentHTML('beforeend', '<span class="got">🌯</span>');
-  c.el.style.left = '108%';
-  setTimeout(() => c.el.remove(), 1600);
-  queue.forEach((q, i) => { q.el.classList.remove('wait'); q.el.style.left = slotX(i) + '%'; clearTimeout(q.t); q.t = setTimeout(() => q.el.classList.add('wait'), 600); });
-  const arm = $('magaArm'); arm.classList.remove('slice'); void arm.getBoundingClientRect(); arm.classList.add('slice');
-  return true;
+$('sceneTabs').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-scene]');
+  if (!b || b.disabled) return;
+  scene = b.dataset.scene;
+  try { localStorage.setItem('scene', scene); } catch {}
+  haptic('light');
+  renderScene(true);
+  sayLocal();
+});
+
+// ---------- скорость дней ----------
+function renderSpeed() {
+  const html = G.SPEEDS.map((sp) => {
+    const locked = !G.canUseSpeed(S, sp);
+    return `<button data-sp="${sp}" class="${S.g.speed === sp ? 'on' : ''} ${locked ? 'locked' : ''}">${locked ? '🔒' : ''}${sp}x</button>`;
+  }).join('');
+  if ($('speedBox').dataset.h !== html) { $('speedBox').dataset.h = html; $('speedBox').innerHTML = html; }
 }
+$('speedBox').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-sp]');
+  if (!b || !S) return;
+  const sp = Number(b.dataset.sp);
+  if (!G.canUseSpeed(S, sp)) {
+    const p = G.PRODUCT.turbo;
+    return modal(`<div class="emoji">⏩</div><h2>Скорость 5x</h2><p>Дни летят в 5 раз быстрее, и в 5 раз быстрее растёт выручка, пока игра открыта. Скорости 1x и 2x бесплатные.</p>
+      <button class="btn" data-act="buy">Открыть навсегда за ⭐ ${p.stars}</button><button class="btn ghost" data-act="close">Не сейчас</button>`, {
+      buy() { closeModal(); screenActs.buyProduct('turbo'); },
+    });
+  }
+  G.accrue(S, now());
+  S.g.speed = sp;
+  haptic('light'); renderSpeed();
+  api('speed', { speed: sp }).catch((err) => { fail(err); resync(); });
+});
+
 let sceneAcc = 0, serveAcc = 0;
 function sceneTick(dtMs) {
   if (!S || tab !== 'biz' || document.hidden) return;
-  const gap = Math.min(3500, Math.max(520, 1000 / G.customerRate(S))); // на экране не чаще ~2 клиентов в секунду
+  renderScene();
+  const sp = G.speedAt(S, now());
+  const share = Math.max(0.05, G.bizIncome(G.BIZ[scene], G.lvl(S, scene)) / Math.max(1e-9, G.BUSINESSES.reduce((a, b) => a + G.bizIncome(b, G.lvl(S, b.id)), 0)));
+  const rate = G.customerRate(S) * sp * (scene === 'kiosk' ? Math.max(share, 0.3) : share);
+  const gap = Math.min(3500, Math.max(480, 1000 / Math.max(rate, 1e-6)));
   sceneAcc += dtMs; serveAcc += dtMs;
-  if (sceneAcc >= gap) { sceneAcc = 0; spawnCustomer(); }
-  if (serveAcc >= gap * 1.05 && queue.length && queue[0].el.classList.contains('wait')) { serveAcc = 0; serveCustomer(); }
-  const part = G.dayPart(now());
+  if (sceneAcc >= gap) { sceneAcc = 0; crowd.spawn(); }
+  if (serveAcc >= gap * 1.05) { if (crowd.serve(false)) serveAcc = 0; }
+  const part = G.dayPart(S);
   const sc = $('tapBtn');
   if (!sc.classList.contains(part)) { sc.classList.remove('dawn', 'day', 'dusk', 'night'); sc.classList.add(part); }
-  if (Date.now() - lastSay > 22000) say(part === 'night' ? 'night' : 'idle');
+  if (Date.now() - lastSay > 22000) (Math.random() < 0.5 ? sayLocal() : say(part === 'night' ? 'night' : 'idle'));
 }
 
 $('tapBtn').addEventListener('pointerdown', (e) => {
   e.preventDefault();
-  if (!S) return;
+  if (!S?.setup) return;
   const v = G.applyTaps(S, 1, now());
   pendingTaps++;
   haptic('light');
   const sc = $('tapBtn');
   sc.classList.add('down'); setTimeout(() => sc.classList.remove('down'), 70);
-  serveCustomer(); serveAcc = 0;
+  crowd.serve(true); serveAcc = 0;
   const r = sc.getBoundingClientRect();
   const f = document.createElement('span');
   f.className = 'fly'; f.textContent = '+' + G.fmtRate(v);
@@ -250,6 +310,20 @@ for (const [id, dir] of [['priceDown', -1], ['priceUp', 1]]) {
   const stop = () => clearInterval(hold);
   $(id).addEventListener('pointerdown', (e) => { e.preventDefault(); changePrice(dir); stop(); let n = 0; hold = setInterval(() => { if (++n > 3) changePrice(dir); }, 90); });
   for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) $(id).addEventListener(ev, stop);
+}
+
+// ---------- имя игрока ----------
+function nameModal() {
+  const guess = (tg?.initDataUnsafe?.user?.first_name || '').slice(0, 20);
+  modal(`<div class="says">🧔🏽 Мага: «Салам! Как тебя звать, хозяин?»</div><h2>Как тебя зовут?</h2><p>Имя увидят другие игроки в рейтинге.</p>
+    <input id="nameInput" class="input" maxlength="20" placeholder="Например, Магжан" value="${esc(guess)}" autocomplete="off">
+    <button class="btn" data-act="save">Дальше</button>`, {
+    save() {
+      const name = $('nameInput').value.trim();
+      api('name', { name }).then(() => { closeModal(); haptic('ok'); bubble(`Мага: Приятно познакомиться, ${S.nick}!`); refresh(); }).catch(fail);
+    },
+  }, true);
+  setTimeout(() => $('nameInput')?.focus(), 150);
 }
 
 // ---------- стартовый опрос: место, аппарат, мясо ----------
@@ -302,6 +376,7 @@ function productStatus(p, t) {
   if (p.id === 'starter' && S.starter) return 'Куплено';
   if (p.id === 'manager' && S.manager) return 'Нанят';
   if (p.id === 'crown' && S.crown) return 'Твоя';
+  if (p.id === 'turbo' && S.g.turbo) return 'Открыто';
   return null;
 }
 function renderShop() {
@@ -310,6 +385,7 @@ function renderShop() {
     if (p.id === 'boost2') { const b = S.boosts.find((x) => x.k === 'stars2' && x.until > t); return b ? `<p class="good">Активно ещё ${G.fmtDur((b.until - t) / 1000)}</p>` : ''; }
     if (p.id === 'vip30' && G.isVip(S, t)) return `<p class="good">Активен ещё ${G.fmtDur((S.vipUntil - t) / 1000)}</p>`;
     if (p.id === 'hints5') return `<p class="good">У тебя советов: ${S.hints}</p>`;
+    if (p.id === 'turbo' && S.g.turbo) return '<p class="good">Переключай скорость над сценой</p>';
     return '';
   };
   return `<h2>Магазин</h2><p class="sub">Покупки за Telegram Stars. Ты всегда видишь, что именно получаешь.</p>
@@ -454,20 +530,29 @@ function eventModal() {
 $('eventBanner').addEventListener('click', eventModal);
 
 // ---------- цикл ----------
-let hadEvent = false;
+let hadEvent = false, lastDay = null;
 function tick() {
   if (!S) return;
   G.accrue(S, now());
   renderHud();
   if (tab === 'biz') updateBiz();
-  if (!S.setup && $('modal').hidden) setupWizard();
+  if (!S.nick && $('modal').hidden) nameModal();
+  else if (!S.setup && $('modal').hidden) setupWizard();
+  const ld = S.g.last?.day ?? 0;
+  if (lastDay === null) lastDay = ld;
+  else if (ld > lastDay) {
+    lastDay = ld;
+    if ($('modal').hidden) toast(`День ${ld} закрыт: ${G.fmt(S.g.last.n)} клиентов, выручка ${G.fmt(S.g.last.rev)} ${C}`);
+    if (tab === 'biz') say('dayEnd', false);
+  }
   if (S.event && !hadEvent) { haptic('ok'); say('event'); if (S.ev.total === 0 && $('modal').hidden) eventModal(); }
   hadEvent = !!S.event;
 }
 function syncLoop() {
   if (!S || document.hidden) return;
   const idle = Date.now() - lastSync;
-  if ((pendingTaps > 0 && idle > 4000) || idle > 15000) api('sync').then(() => { if (tab !== 'biz' && tab !== 'top' && $('modal').hidden) renderOther(); }).catch(() => {});
+  const every = S.g.speed > 1 ? 8000 : 15000; // при ускорении сервер должен знать, что игрок в игре
+  if ((pendingTaps > 0 && idle > 4000) || idle > every) api('sync').then(() => { if (tab !== 'biz' && tab !== 'top' && $('modal').hidden) renderOther(); }).catch(() => {});
 }
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) { hiddenAt = Date.now(); if (pendingTaps) api('sync').catch(() => {}); return; }
@@ -479,7 +564,7 @@ document.addEventListener('visibilitychange', () => {
 function showOffline(o) {
   if (!o || !(o.earned >= 1) || !$('modal').hidden) return;
   const cap = G.offlineCapSec(S, now());
-  modal(`<div class="emoji">💰</div><h2>Пока тебя не было</h2><p>Точки отработали <b>${G.fmtDur(o.sec)}</b> и принесли</p>
+  modal(`<div class="emoji">💰</div><h2>Пока тебя не было</h2><p>Прошло <b>${o.days || 0} игр. дн.</b> Точки отработали <b>${G.fmtDur(o.sec)}</b> и принесли</p>
     <div class="big good" style="text-align:center;margin-bottom:12px">+${G.fmt(o.earned)} ${C}</div>
     ${o.capped ? `<p class="muted">Касса вмещает выручку только за ${G.fmtDur(cap)}. ${S.manager || G.isVip(S, now()) ? '' : 'Управляющий в магазине увеличит её до 12 часов.'}</p>` : ''}
     <button class="btn" data-act="close">Забрать</button>${o.capped && !S.manager ? '<button class="btn ghost" data-act="shop">В магазин</button>' : ''}`, { shop() { closeModal(); setTab('shop'); } });
@@ -498,11 +583,14 @@ async function boot() {
   $('loading').hidden = true; $('app').hidden = false;
   refresh();
   setInterval(tick, 200);
+  renderScene(true);
   setInterval(() => sceneTick(150), 150);
-  for (let i = 0; i < 2; i++) setTimeout(spawnCustomer, 300 + i * 700);
   setInterval(syncLoop, 1000);
-  if (j.isNew) {
-    modal(`<div class="emoji">🌯</div><h2>Знакомься, это Мага</h2><p>Мага пятнадцать лет стоит у гриля и делает лучший донер в городе. Ты хозяин, он мастер. У тебя 500 тысяч тенге стартового капитала. Выбери место, аппарат и мясо, поставь цену на донер и расти сеть. Тап по ларьку обслуживает клиента.</p><p>Иногда на точках случаются ситуации. От твоего решения зависит доход.</p>
+  if (j.migrated) {
+    modal(`<div class="emoji">🛠️</div><h2>Игра обновилась</h2><p>Экономика стала реалистичнее и сложнее, появились новые заведения, работники и скорость дней. Прогресс начинается заново с 500 тыс ${C}, а всё купленное за Stars осталось у тебя.</p>
+      <button class="btn" data-act="close">Понятно</button>`);
+  } else if (j.isNew) {
+    modal(`<div class="emoji">🌯</div><h2>Знакомься, это Мага</h2><p>Мага пятнадцать лет стоит у гриля и делает лучший донер в городе. Ты хозяин, он мастер. У тебя 500 тысяч тенге стартового капитала. Выбери место, аппарат и мясо, поставь цену на донер и расти сеть. Тап по сцене обслуживает клиента.</p><p>Дни в игре идут быстрее реальных. Скорости 1x и 2x бесплатные.</p><p>Иногда на точках случаются ситуации. От твоего решения зависит доход.</p>
       <button class="btn" data-act="close">Начать</button>`);
   } else { showOffline(j.offline); if (j.offline) setTimeout(() => say('back'), 600); }
 }

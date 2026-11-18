@@ -32,6 +32,7 @@ export function createService({ storage, tg = null, cfg, clock = () => Date.now(
       const row = await storage.getUser(id);
       if (!row) return null;
       e = { row, dirty: false, touched: 0 };
+      if (G.migrate(row.state, clock())) { e.dirty = true; e.migrated = true; }
       cache.set(id, e);
     }
     e.touched = clock();
@@ -122,6 +123,7 @@ export function createService({ storage, tg = null, cfg, clock = () => Date.now(
         G.applyTaps(s, Math.max(0, allowed), now);
       }
       s.tapTs = now;
+      s.g.activeUntil = now + G.ACTIVE_WINDOW_MS;
       touch(row, now);
       const res = (await fn(row, s, now)) || {};
       ensureEvent(s, now);
@@ -149,7 +151,7 @@ export function createService({ storage, tg = null, cfg, clock = () => Date.now(
     if (tg) await tg.sendMessage(inviterId, `🤝 <b>${esc(friendName || 'Твой друг')}</b> открыл свою шаурмичную по твоей ссылке!\nТебе начислено <b>${G.fmt(amount)} ${G.CURRENCY}</b> и доход ×2 на час.`, playButton()).catch(() => {});
   }
 
-  const owned = (s, pid) => (pid === 'starter' && s.starter) || (pid === 'manager' && s.manager) || (pid === 'crown' && s.crown);
+  const owned = (s, pid) => (pid === 'starter' && s.starter) || (pid === 'manager' && s.manager) || (pid === 'crown' && s.crown) || (pid === 'turbo' && s.g.turbo);
 
   function grantProduct(row, s, pid, now) {
     const p = G.PRODUCT[pid];
@@ -161,6 +163,7 @@ export function createService({ storage, tg = null, cfg, clock = () => Date.now(
     else if (pid === 'skip4') G.grantMinutes(s, 240, now);
     else if (pid === 'hints5') s.hints += 5;
     else if (pid === 'crown') s.crown = true;
+    else if (pid === 'turbo') { s.g.turbo = true; s.g.speed = 5; }
     row.stars_spent = (row.stars_spent || 0) + p.stars;
   }
 
@@ -208,19 +211,25 @@ export function createService({ storage, tg = null, cfg, clock = () => Date.now(
         } else {
           const s = e.row.state;
           const away = now - s.ts;
+          const dayBefore = G.gameDay(s);
           const r = G.accrue(s, now);
-          if (away > 5 * 60e3) offline = { earned: r.earned, sec: r.sec, capped: r.capped };
-          e.row.name = name; e.row.username = u.username || null;
+          if (away > 5 * 60e3) offline = { earned: r.earned, sec: r.sec, capped: r.capped, days: G.gameDay(s) - dayBefore };
+          if (e.migrated) offline = null;
+          if (!s.nick) e.row.name = name;
+          e.row.username = u.username || null;
         }
         const { row } = e, s = row.state;
         s.tapTs = now;
+        s.g.activeUntil = now + G.ACTIVE_WINDOW_MS;
         touch(row, now);
         ensureEvent(s, now);
         const today = G.dayIndex(now);
         if (s.openDay !== today) { s.openDay = today; log(id, 'open', null); }
         syncDerived(row, now);
         await persist(e);
-        return { isNew, offline, config: { dev: cfg.dev, refLink: refLink(id), support: cfg.supportContact }, ...snapshot(row, now) };
+        const migrated = !!e.migrated;
+        e.migrated = false;
+        return { isNew, offline, migrated, config: { dev: cfg.dev, refLink: refLink(id), support: cfg.supportContact }, ...snapshot(row, now) };
       });
     },
 
@@ -231,6 +240,20 @@ export function createService({ storage, tg = null, cfg, clock = () => Date.now(
       if (!r.ok) throw new ApiError(400, r.reason);
       s.nextEventAt = now + G.FIRST_EVENT_MS;
       log(row.id, 'setup', s.setup);
+    }, { save: true }),
+
+    speed: (auth, body) => action(auth, body, (row, s) => {
+      const sp = Number(body.speed);
+      if (!G.SPEEDS.includes(sp)) throw new ApiError(400, 'bad_speed');
+      if (!G.setSpeed(s, sp)) throw new ApiError(402, 'need_turbo');
+    }),
+
+    name: (auth, body) => action(auth, body, (row, s) => {
+      const nick = String(body.name || '').replace(/\s+/g, ' ').trim();
+      if (!/^[\p{L}\p{N} ._-]{2,20}$/u.test(nick)) throw new ApiError(400, 'bad_name');
+      s.nick = nick;
+      row.name = nick;
+      lbCache.clear();
     }, { save: true }),
 
     price: (auth, body) => action(auth, body, (row, s) => {
@@ -390,20 +413,33 @@ export function createService({ storage, tg = null, cfg, clock = () => Date.now(
       const param = /^[A-Za-z0-9_-]{1,64}$/.test(args[0] || '') ? args[0] : '';
       return tg.sendMessage(chat, `🌯 <b>${G.GAME_TITLE}</b>\n\nМага пятнадцать лет стоит у гриля и делает лучший донер в городе. Ты хозяин, он мастер. Превратите ларёк у остановки в сеть по всему Казахстану. Точки зарабатывают игровые тенге, даже когда ты спишь.\n\nЖми «Играть» 👇`, playButton(param));
     }
-    if (cmd === '/help') return tg.sendMessage(chat, 'Покупай точки, улучшай их, решай ситуации и продавай сеть ради очков франшизы.\n\n/terms — условия\n/paysupport — вопросы по оплате', playButton());
+    if (cmd === '/help') return tg.sendMessage(chat, 'Выбери место, аппарат и мясо, поставь цену на донер, открывай новые заведения и нанимай работников. Решай ситуации, которые подкидывает Мага, и продавай сеть ради очков франшизы. Скорость дней 1x и 2x бесплатно, 5x — в магазине.\n\n/terms — условия\n/paysupport — вопросы по оплате', playButton());
     if (cmd === '/terms') return tg.sendMessage(chat, TERMS);
     if (cmd === '/paysupport') return tg.sendMessage(chat, `Если покупка не пришла или ты хочешь вернуть звёзды, напиши${cfg.supportContact ? ' ' + esc(cfg.supportContact) : ' администратору'} и укажи свой ID: <code>${msg.from.id}</code>. Возврат делаем в течение 24 часов.`);
     if (!isAdmin) return;
 
-    if (cmd === '/stats') {
-      const st = await storage.stats();
-      const pct = (a, b) => (b ? `${Math.round((a / b) * 100)}% (${a}/${b})` : 'нет данных');
-      const src = (st.sources || []).map((s) => `• ${esc(s.source)}: ${s.users} игр., ${s.payers} плат., ${s.stars}⭐`).join('\n');
-      return tg.sendMessage(chat, `<b>Статистика</b>\nИгроков: ${st.users}\nНовых за 24ч: ${st.new_24h}\nАктивных за 24ч: ${st.dau}\nВернулись на 2-й день: ${pct(st.d1_returned, st.d1_cohort)}\nВернулись через 7 дней: ${pct(st.d7_returned, st.d7_cohort)}\nПлатящих: ${st.payers} (${st.users ? ((st.payers / st.users) * 100).toFixed(1) : 0}%)\nStars всего: ${st.stars}⭐\n\n<b>Источники</b>\n${src || '—'}`);
+    if (cmd === '/admin') return tg.sendMessage(chat, '<b>Админ-меню</b>\nВыбери действие:', { reply_markup: ADMIN_KB });
+    if (cmd === '/stats') return tg.sendMessage(chat, await statsText(), { reply_markup: BACK_KB });
+    if (cmd === '/top') return tg.sendMessage(chat, await topText(), { reply_markup: BACK_KB });
+    if (cmd === '/purchases') return tg.sendMessage(chat, await purchasesText(), { reply_markup: BACK_KB });
+    if (cmd === '/player') {
+      const uid = Number(args[0]);
+      if (!uid) return tg.sendMessage(chat, 'Формат: /player &lt;user_id&gt;');
+      return tg.sendMessage(chat, await playerText(uid), { reply_markup: BACK_KB });
+    }
+    if (cmd === '/broadcast') {
+      const body = text.slice(cmdRaw.length).trim();
+      if (!body) return tg.sendMessage(chat, BROADCAST_HELP);
+      if (body.length > 3500) return tg.sendMessage(chat, 'Слишком длинно: максимум 3500 символов.');
+      pendingBroadcast.set(msg.from.id, body);
+      const total = (await storage.stats()).users;
+      return tg.sendMessage(chat, `<b>Предпросмотр рассылки</b> (получат ${total} игроков):\n\n${esc(body)}`, {
+        reply_markup: { inline_keyboard: [[{ text: `✅ Отправить всем (${total})`, callback_data: 'adm:bc_go' }], [{ text: '✖️ Отмена', callback_data: 'adm:bc_no' }]] },
+      });
     }
     if (cmd === '/refund') {
       const pur = args[0] && (await storage.getPurchase(args[0]));
-      if (!pur) return tg.sendMessage(chat, 'Формат: /refund &lt;charge_id&gt;. Платёж не найден.');
+      if (!pur) return tg.sendMessage(chat, 'Формат: /refund &lt;charge_id&gt;. Платёж не найден. Номера платежей: /purchases');
       if (pur.refunded) return tg.sendMessage(chat, 'Этот платёж уже возвращён.');
       await tg.call('refundStarPayment', { user_id: pur.user_id, telegram_payment_charge_id: pur.charge_id });
       await storage.setPurchaseRefunded(pur.charge_id);
@@ -412,14 +448,121 @@ export function createService({ storage, tg = null, cfg, clock = () => Date.now(
     }
     if (cmd === '/grant') {
       const uid = Number(args[0]);
-      if (!uid || !G.PRODUCT[args[1]]) return tg.sendMessage(chat, `Формат: /grant &lt;user_id&gt; &lt;товар&gt;\nТовары: ${G.PRODUCTS.map((p) => p.id).join(', ')}`);
+      if (!uid || !G.PRODUCT[args[1]]) return tg.sendMessage(chat, GRANT_HELP);
+      const e = await load(uid);
+      if (!e) return tg.sendMessage(chat, 'Игрок не найден.');
       await mutate(uid, (row, s, now) => { grantProduct(row, s, args[1], now); row.stars_spent -= G.PRODUCT[args[1]].stars; }, { save: true });
       return tg.sendMessage(chat, `Выдано: ${args[1]} → ${uid}`);
     }
   }
 
+  // ---------- админ-меню ----------
+  const pendingBroadcast = new Map();
+  let broadcasting = false;
+  const ADMIN_KB = { inline_keyboard: [
+    [{ text: '📊 Статистика', callback_data: 'adm:stats' }, { text: '🏆 Топ-10', callback_data: 'adm:top' }],
+    [{ text: '💰 Покупки', callback_data: 'adm:pur' }, { text: '👤 Игрок', callback_data: 'adm:find' }],
+    [{ text: '📣 Рассылка', callback_data: 'adm:bc' }, { text: '🎁 Выдать товар', callback_data: 'adm:grant' }],
+    [{ text: '↩️ Возврат Stars', callback_data: 'adm:refund' }],
+  ] };
+  const BACK_KB = { inline_keyboard: [[{ text: '⬅️ Меню', callback_data: 'adm:menu' }]] };
+  const BROADCAST_HELP = 'Отправь сообщение в формате:\n<code>/broadcast Текст рассылки</code>\n\nСначала придёт предпросмотр с кнопкой «Отправить всем».';
+  const GRANT_HELP = `Выдать товар бесплатно:\n<code>/grant user_id товар</code>\n\nТовары: ${G.PRODUCTS.map((p) => `<code>${p.id}</code>`).join(', ')}`;
+
+  async function statsText() {
+    const st = await storage.stats();
+    const pct = (a, b) => (b ? `${Math.round((a / b) * 100)}% (${a}/${b})` : 'нет данных');
+    const src = (st.sources || []).map((x) => `• ${esc(x.source)}: ${x.users} игр., ${x.payers} плат., ${x.stars}⭐`).join('\n');
+    return `<b>Статистика</b>\nИгроков: ${st.users}\nНовых за 24ч: ${st.new_24h}\nАктивных за 24ч: ${st.dau}\nВернулись на 2-й день: ${pct(st.d1_returned, st.d1_cohort)}\nВернулись через 7 дней: ${pct(st.d7_returned, st.d7_cohort)}\nПлатящих: ${st.payers} (${st.users ? ((st.payers / st.users) * 100).toFixed(1) : 0}%)\nStars всего: ${st.stars}⭐\n\n<b>Источники</b>\n${src || '—'}`;
+  }
+  async function topText() {
+    const rows = await storage.top(null, 10);
+    return `<b>Топ-10 игроков</b>\n${rows.map((r, i) => `${i + 1}. ${esc(r.name)}${r.city ? ` (${esc(r.city)})` : ''} — ${G.fmt(r.total_earned)} ${G.CURRENCY} · <code>${r.id}</code>`).join('\n') || 'Пока пусто'}`;
+  }
+  async function purchasesText() {
+    const rows = await storage.recentPurchases(10);
+    if (!rows.length) return '<b>Последние покупки</b>\nПокупок пока нет.';
+    return `<b>Последние покупки</b>\n${rows.map((p) => `${p.refunded ? '↩️' : '✅'} ${esc(G.PRODUCT[p.product]?.title || p.product)} · ${p.stars}⭐ · игрок <code>${p.user_id}</code>\n   <code>${esc(p.charge_id)}</code>`).join('\n')}\n\nВернуть звёзды: <code>/refund charge_id</code>`;
+  }
+  async function playerText(uid) {
+    const e = await load(uid);
+    if (!e) return 'Игрок не найден.';
+    const { row } = e, st = row.state, now = clock();
+    const levels = G.BUSINESSES.filter((b) => G.lvl(st, b.id) > 0).map((b) => `${b.emoji}${G.lvl(st, b.id)}`).join(' ');
+    const flags = [st.starter && 'стартовый набор', st.manager && 'управляющий', G.isVip(st, now) && 'VIP', st.g?.turbo && 'турбо 5x', st.crown && 'корона'].filter(Boolean).join(', ');
+    return `<b>${esc(row.name)}</b> <code>${row.id}</code>${row.username ? ' @' + esc(row.username) : ''}\nГород: ${esc(row.city || '—')} · источник: ${esc(row.source || 'organic')}\nДень игры: ${G.gameDay(st)} · скорость ${st.g?.speed || 1}x\nДеньги: ${G.fmt(st.money)} ${G.CURRENCY} · всего заработано ${G.fmt(st.totalEarned)}\nТочки: ${levels}\nФраншиза: ${st.franchise} очк., продаж сети: ${st.prestiges}\nПотрачено: ${row.stars_spent || 0}⭐${flags ? ' · ' + flags : ''}\nПоследний вход: ${row.last_seen?.slice(0, 16).replace('T', ' ')} UTC`;
+  }
+
+  async function runBroadcast(adminChat, text) {
+    broadcasting = true;
+    let sent = 0, failed = 0, after = 0;
+    try {
+      for (;;) {
+        const ids = await storage.listUserIds(after, 200);
+        if (!ids.length) break;
+        for (const id of ids) {
+          try { await tg.sendMessage(id, text, playButton()); sent++; } catch { failed++; }
+          await new Promise((r) => setTimeout(r, 40)); // не больше ~25 сообщений в секунду
+        }
+        after = ids.at(-1);
+      }
+    } finally { broadcasting = false; }
+    await tg.sendMessage(adminChat, `📣 Рассылка завершена: доставлено ${sent}, не доставлено ${failed} (заблокировали бота или не запускали его).`).catch(() => {});
+  }
+
+  async function onCallback(q) {
+    const answer = (text) => tg.call('answerCallbackQuery', { callback_query_id: q.id, ...(text ? { text } : {}) }).catch(() => {});
+    if (!cfg.adminIds.includes(q.from.id) || !String(q.data || '').startsWith('adm:')) return answer();
+    const chat = q.message?.chat?.id ?? q.from.id;
+    const msgId = q.message?.message_id;
+    const show = async (text, kb = BACK_KB) => {
+      if (msgId) {
+        try { return await tg.call('editMessageText', { chat_id: chat, message_id: msgId, text, parse_mode: 'HTML', reply_markup: kb }); } catch {}
+      }
+      return tg.sendMessage(chat, text, { reply_markup: kb });
+    };
+    const act = q.data.slice(4);
+    await answer();
+    if (act === 'menu') return show('<b>Админ-меню</b>\nВыбери действие:', ADMIN_KB);
+    if (act === 'stats') return show(await statsText());
+    if (act === 'top') return show(await topText());
+    if (act === 'pur' || act === 'refund') return show(await purchasesText());
+    if (act === 'find') return show('Отправь <code>/player user_id</code>.\nID игроков есть в «Топ-10» и в «Покупках».');
+    if (act === 'grant') return show(GRANT_HELP);
+    if (act === 'bc') return show(BROADCAST_HELP);
+    if (act === 'bc_no') { pendingBroadcast.delete(q.from.id); return show('Рассылка отменена.'); }
+    if (act === 'bc_go') {
+      const text = pendingBroadcast.get(q.from.id);
+      if (!text) return show('Нечего отправлять. Сначала /broadcast текст.');
+      if (broadcasting) return show('Рассылка уже идёт, дождись отчёта.');
+      pendingBroadcast.delete(q.from.id);
+      runBroadcast(chat, text).catch((e) => console.error('broadcast:', e.message));
+      return show('📣 Рассылка запущена. Пришлю отчёт, когда закончу.');
+    }
+  }
+
+  async function registerCommands() {
+    if (!tg) return;
+    const user = [
+      { command: 'start', description: 'Открыть игру' },
+      { command: 'help', description: 'Как играть' },
+      { command: 'terms', description: 'Условия' },
+      { command: 'paysupport', description: 'Вопросы по оплате' },
+    ];
+    const admin = [...user,
+      { command: 'admin', description: 'Админ-меню' },
+      { command: 'stats', description: 'Статистика' },
+      { command: 'broadcast', description: 'Рассылка всем игрокам' },
+      { command: 'player', description: 'Карточка игрока' },
+      { command: 'purchases', description: 'Последние покупки' },
+    ];
+    await tg.call('setMyCommands', { commands: user });
+    for (const id of cfg.adminIds) await tg.call('setMyCommands', { commands: admin, scope: { type: 'chat', chat_id: id } }).catch((e) => console.error('admin commands:', e.message));
+  }
+
   async function handleUpdate(u) {
     if (u.pre_checkout_query) return onPreCheckout(u.pre_checkout_query);
+    if (u.callback_query) return onCallback(u.callback_query);
     if (u.message) return onMessage(u.message);
   }
 
@@ -436,7 +579,7 @@ export function createService({ storage, tg = null, cfg, clock = () => Date.now(
   }
 
   return {
-    api, handleUpdate, sendReminders, flushAll,
+    api, handleUpdate, sendReminders, flushAll, registerCommands,
     setBotUsername(n) { botUsername = n; },
     start() {
       timers.push(setInterval(async () => {

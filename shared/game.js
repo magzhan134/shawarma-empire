@@ -5,8 +5,8 @@ export const CURRENCY = '₸';
 export const GAME_TITLE = 'Шаурма-империя';
 
 export const FRANCHISE_BONUS = 0.1; // +10% к доходу за очко франшизы
-export const PRESTIGE_K = 2.5e9; // очки = floor(sqrt(заработано за забег / K))
-export const PRESTIGE_MIN = 10; // минимум очков, чтобы продать сеть
+export const PRESTIGE_K = 1e12; // очки = floor(sqrt(заработано за забег / K))
+export const PRESTIGE_MIN = 5; // минимум очков, чтобы продать сеть
 export const TAP_SHARE = 0.05; // тап = 5% дохода в секунду
 export const TAP_MIN = 20;
 export const START_CAPITAL = 500000; // стартовый капитал, ₸
@@ -26,18 +26,77 @@ export const REF_REWARD_MIN = 30; // минут дохода обоим за п�
 export const REF_LEVELS_NEEDED = 10; // друг должен купить 10 уровней, чтобы награда выдалась
 export const TZ_OFFSET_H = 5; // сутки считаем по времени Казахстана
 
-export const MILESTONES = [10, 25, 50, 100, 150, 200, 300, 400];
+// Игровое время: сутки в игре идут быстрее реальных. Скорость 1x и 2x бесплатно, 5x — покупка «Турбо».
+// Ускорение работает только пока игра открыта (сервер получает запросы); вне игры время идёт как 1x.
+export const GAME_DAY_MS = 10 * 60 * 1000; // одни игровые сутки = 10 минут при скорости 1x
+export const SPEEDS = [1, 2, 5];
+export const FREE_SPEED_MAX = 2;
+export const ACTIVE_WINDOW_MS = 25000; // сколько после последнего запроса игрок считается «в игре»
+export const STATE_VERSION = 3;
 
+export const MILESTONES = [25, 50, 100, 200, 300, 400];
+
+// payback = baseCost / baseIncome: за сколько секунд (при 1x) окупается первый уровень точки.
 export const BUSINESSES = [
-  { id: 'kiosk', name: 'Ларёк Маги', emoji: '🌯', baseCost: 2500, growth: 1.07, baseIncome: 100 },
-  { id: 'mall', name: 'Точка в ТРЦ', emoji: '🏬', baseCost: 50000, growth: 1.1, baseIncome: 1000 },
-  { id: 'cafe', name: 'Кафе с залом', emoji: '☕', baseCost: 625000, growth: 1.11, baseIncome: 6250 },
-  { id: 'delivery', name: 'Служба доставки', emoji: '🛵', baseCost: 7.5e6, growth: 1.12, baseIncome: 37500 },
-  { id: 'restaurant', name: 'Ресторан на Арбате', emoji: '🍽️', baseCost: 100e6, growth: 1.12, baseIncome: 250000 },
-  { id: 'factory', name: 'Цех лаваша и соусов', emoji: '🏭', baseCost: 1.25e9, growth: 1.13, baseIncome: 1.625e6 },
-  { id: 'cities', name: 'Сеть по городам', emoji: '🚚', baseCost: 18.75e9, growth: 1.13, baseIncome: 12.5e6 },
-  { id: 'world', name: 'Международная франшиза', emoji: '🌍', baseCost: 300e9, growth: 1.14, baseIncome: 100e6 },
+  { id: 'kiosk', name: 'Ларёк Маги', emoji: '🌯', baseCost: 30000, growth: 1.11, baseIncome: 100 },
+  { id: 'mall', name: 'Точка в ТРЦ', emoji: '🏬', baseCost: 1.35e6, growth: 1.12, baseIncome: 1500 },
+  { id: 'cafe', name: 'Кафе с залом', emoji: '☕', baseCost: 45e6, growth: 1.13, baseIncome: 15000 },
+  { id: 'delivery', name: 'Служба доставки', emoji: '🛵', baseCost: 1.6e9, growth: 1.14, baseIncome: 180000 },
+  { id: 'restaurant', name: 'Ресторан', emoji: '🍽️', baseCost: 60e9, growth: 1.14, baseIncome: 2.4e6 },
+  { id: 'factory', name: 'Цех лаваша и соусов', emoji: '🏭', baseCost: 2.2e12, growth: 1.15, baseIncome: 36e6 },
+  { id: 'cities', name: 'Сеть по городам', emoji: '🚚', baseCost: 72e12, growth: 1.15, baseIncome: 600e6 },
+  { id: 'world', name: 'Международная франшиза', emoji: '🌍', baseCost: 2.5e15, growth: 1.16, baseIncome: 10e9 },
 ];
+
+// Работники по точкам: появляются на сцене и в списке с ростом уровня точки.
+// look: skin 0–4, hair 0–4 (цвет), shirt — цвет формы, hat: chef | cap | helmet, long — длинные волосы, beard — борода.
+export const STAFF = {
+  kiosk: [
+    { at: 1, name: 'Мага', role: 'донерщик', look: 'maga' },
+    { at: 25, name: 'Рустам', role: 'кассир', look: { skin: 2, hair: 0, shirt: '#ff8a4a', hat: 'cap' } },
+    { at: 100, name: 'Ахмед', role: 'помощник', look: { skin: 3, hair: 0, shirt: '#ffb22e', beard: true } },
+  ],
+  mall: [
+    { at: 1, name: 'Айгерим', role: 'кассир', look: { skin: 1, hair: 1, shirt: '#ff5a36', hat: 'cap', long: true } },
+    { at: 10, name: 'Тимур', role: 'донерщик', look: { skin: 2, hair: 0, shirt: '#f3ede2', hat: 'chef' } },
+    { at: 50, name: 'Даурен', role: 'уборщик', look: { skin: 3, hair: 2, shirt: '#6fb6ff' } },
+  ],
+  cafe: [
+    { at: 1, name: 'Дана', role: 'официантка', look: { skin: 1, hair: 3, shirt: '#3a3a4a', long: true } },
+    { at: 1, name: 'Ерлан', role: 'повар', look: { skin: 2, hair: 0, shirt: '#f3ede2', hat: 'chef' } },
+    { at: 25, name: 'Алия', role: 'бариста', look: { skin: 1, hair: 1, shirt: '#8a5a2a', long: true } },
+    { at: 100, name: 'Марат', role: 'официант', look: { skin: 3, hair: 0, shirt: '#3a3a4a' } },
+  ],
+  delivery: [
+    { at: 1, name: 'Нурик', role: 'курьер', look: { skin: 2, hair: 0, shirt: '#ffb22e', hat: 'helmet' } },
+    { at: 10, name: 'Жанар', role: 'диспетчер', look: { skin: 1, hair: 1, shirt: '#5fd88f', long: true } },
+    { at: 25, name: 'Самат', role: 'курьер', look: { skin: 3, hair: 0, shirt: '#ffb22e', hat: 'helmet' } },
+    { at: 100, name: 'Арсен', role: 'курьер', look: { skin: 2, hair: 2, shirt: '#ffb22e', hat: 'helmet' } },
+  ],
+  restaurant: [
+    { at: 1, name: 'Арман', role: 'шеф-повар', look: { skin: 2, hair: 0, shirt: '#f3ede2', hat: 'chef', beard: true } },
+    { at: 1, name: 'Мадина', role: 'хостес', look: { skin: 1, hair: 0, shirt: '#b0303a', long: true } },
+    { at: 25, name: 'Бекзат', role: 'официант', look: { skin: 3, hair: 0, shirt: '#2b2b3a' } },
+    { at: 100, name: 'Сабина', role: 'сомелье', look: { skin: 1, hair: 3, shirt: '#4b3170', long: true } },
+  ],
+  factory: [
+    { at: 1, name: 'Бахыт', role: 'технолог', look: { skin: 2, hair: 4, shirt: '#f7efe4', hat: 'cap' } },
+    { at: 1, name: 'Серик', role: 'рабочий', look: { skin: 3, hair: 0, shirt: '#6fb6ff', hat: 'helmet' } },
+    { at: 25, name: 'Олжас', role: 'рабочий', look: { skin: 2, hair: 0, shirt: '#6fb6ff', hat: 'helmet' } },
+    { at: 100, name: 'Гульнара', role: 'контроль качества', look: { skin: 1, hair: 1, shirt: '#f7efe4', long: true } },
+  ],
+  cities: [
+    { at: 1, name: 'Асель', role: 'логист', look: { skin: 1, hair: 0, shirt: '#5fd88f', long: true } },
+    { at: 1, name: 'Канат', role: 'водитель', look: { skin: 3, hair: 0, shirt: '#ff8a4a', hat: 'cap' } },
+    { at: 25, name: 'Ержан', role: 'управляющий', look: { skin: 2, hair: 4, shirt: '#2b2b3a', beard: true } },
+  ],
+  world: [
+    { at: 1, name: 'Мага', role: 'вице-президент', look: 'maga' },
+    { at: 1, name: 'Луиза', role: 'партнёр в Европе', look: { skin: 0, hair: 3, shirt: '#2b2b3a', long: true } },
+    { at: 25, name: 'Кенджи', role: 'партнёр в Азии', look: { skin: 1, hair: 0, shirt: '#1d1410' } },
+  ],
+};
+export const staffFor = (id, level) => (STAFF[id] || []).filter((w) => level >= w.at);
 
 // Стартовый опрос: на что потратить капитал. traffic — поток клиентов, fair — какую цену люди считают честной.
 export const LOCATIONS = [
@@ -71,8 +130,9 @@ export const PRODUCTS = [
   { id: 'boost2', stars: 25, emoji: '🚀', title: 'Доход ×2 на 24 часа', desc: 'Все точки приносят вдвое больше. Время складывается.' },
   { id: 'manager', stars: 50, once: true, emoji: '🧑‍💼', title: 'Управляющий', desc: 'Касса копит выручку 12 часов вместо 2, пока тебя нет. Навсегда.' },
   { id: 'vip30', stars: 199, emoji: '👑', title: 'VIP на 30 дней', desc: 'Доход ×1,5, касса на 24 часа, бесплатные советы, двойная ежедневная награда.' },
-  { id: 'skip4', stars: 15, emoji: '⏩', title: 'Перемотка на 4 часа', desc: 'Мгновенно получи выручку за 4 часа работы сети.' },
+  { id: 'skip4', stars: 15, emoji: '⏱️', title: 'Перемотка на 4 часа', desc: 'Мгновенно получи выручку за 4 часа работы сети.' },
   { id: 'hints5', stars: 20, emoji: '💡', title: '5 советов консультанта', desc: 'Консультант подсветит лучшее решение в ситуации.' },
+  { id: 'turbo', stars: 75, once: true, emoji: '⏩', title: 'Турбо-скорость 5x', desc: 'Открывает скорость 5x: дни летят в 5 раз быстрее, пока игра открыта. Навсегда.' },
   { id: 'crown', stars: 100, once: true, emoji: '🏆', title: 'Золотая корона', desc: 'Корона рядом с именем в рейтинге. Навсегда.' },
 ];
 export const PRODUCT = Object.fromEntries(PRODUCTS.map((p) => [p.id, p]));
@@ -109,14 +169,15 @@ export function fmtDur(sec) {
 // ---------- состояние ----------
 export function newState(now) {
   return {
-    v: 2, money: START_CAPITAL, setup: null, price: BASE_PRICE, runEarned: 0, totalEarned: 0, ts: now, tapTs: now, taps: 0,
+    v: STATE_VERSION, money: START_CAPITAL, setup: null, price: BASE_PRICE, nick: null,
+    g: { t: 0, speed: 1, activeUntil: 0, turbo: false, last: null }, runEarned: 0, totalEarned: 0, ts: now, tapTs: now, taps: 0,
     biz: { kiosk: 1 }, franchise: 0, prestiges: 0,
     boosts: [], vipUntil: 0, manager: false, starter: false, crown: false, hints: 1,
     event: null, nextEventAt: now + FIRST_EVENT_MS, seen: [],
     ev: { total: 0, best: 0, streak: 0, maxStreak: 0 },
     daily: { day: 0, streak: 0 },
     ref: { by: null, rewarded: false, count: 0 },
-    cust: { day: dayIndex(now), n: 0, total: 0 },
+    cust: { day: 1, n: 0, rev: 0, total: 0 },
     createdAt: now, openDay: 0,
   };
 }
@@ -194,46 +255,92 @@ export const incomeAt = (s, t) => baseIncome(s) * multAt(s, t);
 // Доход без временных бустов: в нём считаются награды «N минут дохода».
 export const steadyIncome = (s, t) => baseIncome(s) * (1 + FRANCHISE_BONUS * s.franchise) * (isVip(s, t) ? VIP_MULT : 1);
 export const offlineCapSec = (s, t) => (isVip(s, t) ? OFFLINE_CAP.vip : s.manager ? OFFLINE_CAP.manager : OFFLINE_CAP.base);
-export const tapValue = (s, t) => (s.setup ? Math.max(TAP_MIN, TAP_SHARE * incomeAt(s, t)) : 0);
+export const tapValue = (s, t) => (s.setup ? Math.max(TAP_MIN, TAP_SHARE * incomeAt(s, t) * speedAt(s, t)) : 0);
 
 // Клиенты у ларька Маги: счётчик для сцены и сериала, на деньги не влияет.
 export function customerRate(s) { // клиентов в секунду: зависит от точек, места, аппарата и цены
   const pi = priceInfo(s);
   return (rawIncome(s) / REF_PROFIT) * pi.traffic * pi.demand;
 }
-export function addCustomers(s, n, now) {
-  const today = dayIndex(now);
-  const c = s.cust || (s.cust = { day: today, n: 0, total: 0 });
-  if (c.day !== today) { c.day = today; c.n = 0; }
-  c.n += n; c.total += n;
+export function addCustomers(s, n) { s.cust.n += n; s.cust.total += n; }
+
+// ---------- игровые сутки ----------
+export const gameDay = (s) => Math.floor((s.g?.t || 0) / GAME_DAY_MS) + 1;
+export function gameClock(s) { // часы и минуты внутри игровых суток; сутки начинаются в 06:00
+  const m = Math.floor((((s.g?.t || 0) % GAME_DAY_MS) / GAME_DAY_MS) * 1440 + 360) % 1440;
+  return { h: Math.floor(m / 60), m: m % 60 };
 }
-export const bizDay = (s, now) => dayIndex(now) - dayIndex(s.createdAt) + 1; // «День N» бизнеса
-export function dayPart(now) {
-  const h = new Date(now + TZ_OFFSET_H * 3600e3).getUTCHours();
-  return h >= 5 && h < 8 ? 'dawn' : h >= 8 && h < 17 ? 'day' : h >= 17 && h < 20 ? 'dusk' : 'night';
+export const dayPartAt = (h) => (h >= 5 && h < 8 ? 'dawn' : h >= 8 && h < 18 ? 'day' : h >= 18 && h < 21 ? 'dusk' : 'night');
+export const dayPart = (s) => dayPartAt(gameClock(s).h);
+export const isActive = (s, t) => (s.g?.activeUntil || 0) > t;
+export const speedAt = (s, t) => (isActive(s, t) ? s.g.speed || 1 : 1);
+export const canUseSpeed = (s, sp) => SPEEDS.includes(sp) && (sp <= FREE_SPEED_MAX || !!s.g.turbo);
+export function setSpeed(s, sp) {
+  if (!canUseSpeed(s, sp)) return false;
+  s.g.speed = sp;
+  return true;
+}
+
+// Двигает игровое время на gameMs и раскладывает клиентов и выручку по игровым суткам.
+// Возвращает итог закрытых суток (если за этот отрезок сутки сменились).
+function advanceGame(s, gameMs, customers, revenue) {
+  const g = s.g, c = s.cust;
+  if (!(gameMs > 0)) return null;
+  let closed = null, left = gameMs;
+  while (left > 0) {
+    const toEnd = GAME_DAY_MS - (g.t % GAME_DAY_MS);
+    const step = Math.min(left, toEnd);
+    const share = step / gameMs;
+    c.n += customers * share; c.rev += revenue * share; c.total += customers * share;
+    g.t += step; left -= step;
+    if (step === toEnd) {
+      const day = Math.round(g.t / GAME_DAY_MS); // номер закрытых суток
+      closed = closed || { from: day, to: day, n: 0, rev: 0 };
+      closed.to = day; closed.n += c.n; closed.rev += c.rev;
+      g.last = { day, n: Math.round(c.n), rev: c.rev };
+      c.day = day + 1; c.n = 0; c.rev = 0;
+    }
+  }
+  return closed;
+}
+
+// Сохранения до версии 3 (другая экономика): прогресс начинается заново, покупки и награды остаются.
+export function migrate(s, now) {
+  if ((s.v || 0) >= STATE_VERSION) return false;
+  const keep = { manager: !!s.manager, starter: !!s.starter, crown: !!s.crown, hints: s.hints ?? 1, vipUntil: s.vipUntil || 0,
+    boosts: s.boosts || [], ref: s.ref, daily: s.daily, ev: s.ev, createdAt: s.createdAt || now, nick: s.nick || null };
+  for (const k of Object.keys(s)) delete s[k];
+  Object.assign(s, newState(now));
+  for (const [k, v] of Object.entries(keep)) if (v !== undefined) s[k] = v;
+  return true;
 }
 
 function earn(s, amount) {
   s.money += amount; s.runEarned += amount; s.totalEarned += amount;
 }
 
-// Начисляет доход с s.ts до now. Учитывает лимит кассы и то, что бусты кончаются посреди интервала.
+// Начисляет доход с s.ts до now. Учитывает лимит кассы, бусты, VIP и скорость (только пока игрок в игре).
 export function accrue(s, now) {
-  if (now <= s.ts) return { earned: 0, sec: 0, capped: false };
+  if (now <= s.ts) return { earned: 0, sec: 0, capped: false, closed: null };
   const start = s.ts;
   const end = Math.min(now, start + offlineCapSec(s, start) * 1000);
   const points = [start, end];
   for (const b of s.boosts) if (b.until > start && b.until < end) points.push(b.until);
   if (s.vipUntil > start && s.vipUntil < end) points.push(s.vipUntil);
+  if (s.g.activeUntil > start && s.g.activeUntil < end) points.push(s.g.activeUntil);
   points.sort((a, b) => a - b);
   const base = baseIncome(s);
-  let earned = 0;
-  for (let i = 0; i < points.length - 1; i++) earned += (base * multAt(s, points[i]) * (points[i + 1] - points[i])) / 1000;
+  let earned = 0, gameMs = 0;
+  for (let i = 0; i < points.length - 1; i++) {
+    const dt = points[i + 1] - points[i], sp = speedAt(s, points[i]);
+    earned += (base * multAt(s, points[i]) * sp * dt) / 1000;
+    gameMs += sp * dt;
+  }
   earn(s, earned);
-  addCustomers(s, (customerRate(s) * (end - start)) / 1000, now);
+  const closed = advanceGame(s, gameMs, (customerRate(s) * gameMs) / 1000, earned);
   s.ts = now;
   s.boosts = s.boosts.filter((b) => b.until > now);
-  return { earned, sec: (end - start) / 1000, capped: now > end };
+  return { earned, sec: (end - start) / 1000, capped: now > end, closed };
 }
 
 export function applyTaps(s, taps, now) {
@@ -241,7 +348,8 @@ export function applyTaps(s, taps, now) {
   const amount = tapValue(s, now) * taps;
   earn(s, amount);
   s.taps += taps;
-  addCustomers(s, taps, now);
+  addCustomers(s, taps);
+  s.cust.rev += amount;
   return amount;
 }
 
@@ -266,6 +374,7 @@ export function doPrestige(s) {
   if (pts < PRESTIGE_MIN) return { ok: false, points: pts };
   s.franchise += pts; s.prestiges += 1;
   s.money = START_CAPITAL; s.runEarned = 0; s.biz = { kiosk: 1 }; s.setup = null; s.price = BASE_PRICE;
+  s.event = null;
   return { ok: true, points: pts };
 }
 

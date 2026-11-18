@@ -109,7 +109,7 @@ test('рефералка: награда обоим после 10 уровней
     assert.equal((await t.storage.getUser(2)).referrer_id, 1);
     assert.equal((await t.storage.getUser(3)).referrer_id, null);
 
-    t.advance(20 * 60e3);
+    t.advance(2 * 3600e3);
     const r = await t.call('buy', 2, { biz: 'kiosk', count: 10 });
     assert.ok(r.refBonus.amount > 0);
     assert.equal(r.state.ref.rewarded, true);
@@ -240,5 +240,105 @@ test('вебхук: без секрета Telegram запрос отклоняе
     assert.equal(sent.length, 0);
     assert.equal((await post({ 'X-Telegram-Bot-Api-Secret-Token': 'sekret' })).status, 200);
     assert.match(sent[0], /Мага/);
+  } finally { await t.close(); }
+});
+
+test('скорость: 2x бесплатно, 5x только с турбо; ускорение только пока игрок в игре', async () => {
+  const t = await boot();
+  try {
+    await t.call('state', 21);
+    let r = await t.call('setup', 21, { loc: 'bus', equip: 'new', meat: 'chicken' });
+    const base = G.baseIncome(r.state);
+    assert.equal((await t.call('speed', 21, { speed: 5 })).error, 'need_turbo');
+    assert.equal((await t.call('speed', 21, { speed: 3 })).error, 'bad_speed');
+    r = await t.call('speed', 21, { speed: 2 });
+    let m0 = r.state.money;
+    t.advance(10_000);
+    r = await t.call('sync', 21);
+    assert.ok(Math.abs(r.state.money - m0 - base * 2 * 10) < 1, 'в игре 2x');
+    // ушёл из игры на час: ускорение действует только 25 секунд после последнего запроса
+    m0 = r.state.money;
+    t.advance(3600e3);
+    r = await t.call('state', 21);
+    const expect = base * (2 * 25 + (3600 - 25));
+    assert.ok(Math.abs(r.state.money - m0 - expect) < 1, `офлайн 1x: ${r.state.money - m0} vs ${expect}`);
+    assert.ok(r.offline.days >= 6);
+    r = await t.call('dev/pay', 21, { product: 'turbo' });
+    assert.equal(r.state.g.turbo, true);
+    assert.equal(r.state.g.speed, 5);
+    assert.equal((await t.call('speed', 21, { speed: 1 })).state.g.speed, 1);
+  } finally { await t.close(); }
+});
+
+test('имя игрока: проверка и показ в рейтинге; Telegram-имя его не перезаписывает', async () => {
+  const t = await boot();
+  try {
+    await t.call('state', 31);
+    assert.equal((await t.call('name', 31, { name: 'a' })).error, 'bad_name');
+    assert.equal((await t.call('name', 31, { name: '<script>' })).error, 'bad_name');
+    let r = await t.call('name', 31, { name: '  Маға  Бизнесмен ' });
+    assert.equal(r.state.nick, 'Маға Бизнесмен');
+    r = await t.call('state', 31);
+    assert.equal(r.me.name, 'Маға Бизнесмен');
+    r = await t.call('leaderboard', 31, { scope: 'global' });
+    assert.equal(r.rows[0].name, 'Маға Бизнесмен');
+  } finally { await t.close(); }
+});
+
+test('старое сохранение (до версии 3) переводится на новую экономику, покупки остаются', async () => {
+  const t = await boot();
+  try {
+    await t.call('state', 41);
+    const row = await t.storage.getUser(41);
+    row.state.v = 2; row.state.biz = { kiosk: 300, mall: 200 }; row.state.money = 1e15; row.state.manager = true; delete row.state.g;
+    await t.storage.updateUser(41, { state: row.state });
+    t.service.flushAll();
+    const t2 = await boot(); // новый процесс сервера читает старую запись
+    await t2.storage.insertUser(row);
+    const r = await t2.call('state', 41);
+    assert.equal(r.state.v, G.STATE_VERSION);
+    assert.equal(r.state.money, G.START_CAPITAL);
+    assert.equal(r.state.biz.kiosk, 1);
+    assert.equal(r.state.manager, true);
+    assert.equal(r.migrated, true);
+    await t2.close();
+  } finally { await t.close(); }
+});
+
+test('админ-меню: только для админа; рассылка уходит всем игрокам', async () => {
+  const sent = [], calls = [];
+  const tg = {
+    call: async (method, params) => { calls.push([method, params]); return true; },
+    sendMessage: async (chat, text, extra) => { sent.push({ chat, text, extra }); },
+  };
+  const t = await boot({ botToken: '333:CCC', tg });
+  try {
+    for (const id of [501, 502, 503]) {
+      const init = signInitData({ auth_date: String(Math.floor(Date.now() / 1000)), user: JSON.stringify({ id, first_name: 'P' + id }) }, '333:CCC');
+      await t.call('state', 0, {}, { 'X-Init-Data': init });
+    }
+    const cmd = (from, text) => t.service.handleUpdate({ message: { from: { id: from }, chat: { id: from, type: 'private' }, text } });
+    const cb = (from, data) => t.service.handleUpdate({ callback_query: { id: 'c', from: { id: from }, data, message: { chat: { id: from }, message_id: 9 } } });
+    await cmd(501, '/admin');
+    assert.equal(sent.length, 0, 'не админ ничего не получает');
+    await cmd(1, '/admin');
+    assert.ok(sent.at(-1).extra.reply_markup.inline_keyboard.flat().some((b) => b.callback_data === 'adm:stats'));
+    await cb(1, 'adm:stats');
+    assert.match(calls.filter((c) => c[0] === 'editMessageText').at(-1)[1].text, /Игроков: 3/);
+    await cb(1, 'adm:top');
+    assert.match(calls.filter((c) => c[0] === 'editMessageText').at(-1)[1].text, /Топ-10/);
+    await cmd(1, '/player 502');
+    assert.match(sent.at(-1).text, /P502/);
+    await cmd(1, '/broadcast Мага открыл новую точку!');
+    assert.match(sent.at(-1).text, /получат 3 игроков/);
+    const before = sent.length;
+    await cb(1, 'adm:bc_go');
+    await new Promise((r) => setTimeout(r, 400));
+    const got = sent.slice(before).filter((m) => m.text === 'Мага открыл новую точку!').map((m) => m.chat).sort();
+    assert.deepEqual(got, [501, 502, 503]);
+    assert.match(sent.at(-1).text, /доставлено 3/);
+    const edits = calls.filter((c) => c[0] === 'editMessageText').length;
+    await cb(501, 'adm:stats'); // не админ: только ответ на нажатие
+    assert.equal(calls.filter((c) => c[0] === 'editMessageText').length, edits);
   } finally { await t.close(); }
 });

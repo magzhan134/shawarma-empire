@@ -56,6 +56,8 @@ export function createMemoryStorage({ file = null } = {}) {
       purchases.set(p.charge_id, { refunded: false, ...p }); dirty = true;
       return true;
     },
+    async listUserIds(after, limit) { return [...users.keys()].filter((id) => id > after).sort((a, b) => a - b).slice(0, limit); },
+    async recentPurchases(limit) { return [...purchases.values()].sort((a, b) => (a.created_at < b.created_at ? 1 : -1)).slice(0, limit).map(clone); },
     async getPurchase(chargeId) { return clone(purchases.get(chargeId)); },
     async setPurchaseRefunded(chargeId) { const p = purchases.get(chargeId); if (p) { p.refunded = true; dirty = true; } },
     async logEvent(user_id, type, data = null) {

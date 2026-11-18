@@ -71,3 +71,8 @@ alter table events enable row level security;
 revoke all on city_leaderboard from anon, authenticated;
 revoke execute on function admin_stats() from public, anon, authenticated;
 grant execute on function admin_stats() to service_role;
+
+-- В новых проектах Supabase таблицы, созданные через SQL, не выдаются серверной роли автоматически.
+grant usage on schema public to service_role;
+grant all on all tables in schema public to service_role;
+grant all on all sequences in schema public to service_role;
