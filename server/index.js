@@ -77,6 +77,29 @@ export async function createApp({ cfg, storage, tg = null, clock, random } = {})
   return { server, service };
 }
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function retry(name, fn) {
+  for (let i = 1; ; i++) {
+    try { return await fn(); } catch (e) {
+      if (e.code === 401 || e.code === 404) throw new Error(`${name}: неверный BOT_TOKEN (${e.message})`);
+      const wait = Math.min(60, 5 * i);
+      console.error(`${name}: попытка ${i} не удалась (${e.message}), повтор через ${wait} с`);
+      await sleep(wait * 1000);
+    }
+  }
+}
+async function setupTelegram(tg, cfg, service) {
+  const me = await retry('Telegram getMe', () => tg.call('getMe', {}, 30000));
+  service.setBotUsername(me.username);
+  if (cfg.tgMode === 'webhook') {
+    await retry('Telegram setWebhook', () => tg.call('setWebhook', { url: cfg.webappUrl + '/tg/webhook', secret_token: cfg.webhookSecret, allowed_updates: ['message', 'pre_checkout_query'] }, 30000));
+  }
+  if (cfg.webappUrl) await tg.call('setChatMenuButton', { menu_button: { type: 'web_app', text: 'Играть', web_app: { url: cfg.webappUrl + '/' } } }, 30000).catch((e) => console.error('menu button:', e.message));
+  else console.warn('WEBAPP_URL не задан: кнопка «Играть» в боте не появится.');
+  if (cfg.tgMode === 'polling') tg.startPolling(service.handleUpdate);
+  console.log(`Бот @${me.username} запущен (${cfg.tgMode === 'webhook' ? 'вебхук' : 'опрос'})`);
+}
+
 async function main() {
   loadEnv();
   const cfg = readConfig();
@@ -86,23 +109,20 @@ async function main() {
   const tg = cfg.botToken ? createTelegram(cfg.botToken) : null;
   const { server, service } = await createApp({ cfg, storage, tg });
 
-  if (tg) {
-    const me = await tg.call('getMe');
-    service.setBotUsername(me.username);
-    if (cfg.tgMode === 'webhook') {
-      if (!cfg.webappUrl) throw new Error('Для TG_MODE=webhook нужен WEBAPP_URL');
-      await tg.call('setWebhook', { url: cfg.webappUrl + '/tg/webhook', secret_token: cfg.webhookSecret, allowed_updates: ['message', 'pre_checkout_query'] });
-    }
-    if (cfg.webappUrl) await tg.call('setChatMenuButton', { menu_button: { type: 'web_app', text: 'Играть', web_app: { url: cfg.webappUrl + '/' } } }).catch((e) => console.error('menu button:', e.message));
-    else console.warn('WEBAPP_URL не задан: кнопка «Играть» в боте не появится.');
-    if (cfg.tgMode === 'polling') tg.startPolling(service.handleUpdate);
-    console.log(`Бот @${me.username} запущен (${cfg.tgMode === 'webhook' ? 'вебхук' : 'опрос'})`);
-  }
+  // Сначала поднимаем HTTP-сервер (Render проверяет, что порт открыт), потом подключаем Telegram с повторами.
   service.start();
   server.listen(cfg.port, () => {
     console.log(`Сервер: http://localhost:${cfg.port}  | база: ${storage.kind}${cfg.dev ? '  | РЕЖИМ РАЗРАБОТКИ (без Telegram, покупки понарошку)' : ''}`);
     if (!cfg.dev && storage.kind === 'memory') console.warn('ВНИМАНИЕ: Supabase не настроен, данные лежат в файле data/dev-db.json.');
   });
+
+  if (tg) {
+    if (cfg.tgMode === 'webhook' && !cfg.webappUrl) {
+      console.error('ОШИБКА: для TG_MODE=webhook нужен WEBAPP_URL. Впиши адрес сервиса в Environment и перезапусти.');
+    } else {
+      setupTelegram(tg, cfg, service).catch((e) => console.error('Telegram:', e.message));
+    }
+  }
 
   const shutdown = async () => {
     tg?.stop();
