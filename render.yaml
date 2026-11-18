@@ -1,0 +1,26 @@
+# Render Blueprint: Render прочитает этот файл и создаст сервис сам.
+services:
+  - type: web
+    name: shawarma-empire
+    runtime: node
+    plan: free
+    buildCommand: "echo no build needed"
+    startCommand: npm start
+    healthCheckPath: /healthz
+    envVars:
+      - key: TG_MODE
+        value: webhook
+      - key: NODE_VERSION
+        value: "22"
+      - key: BOT_TOKEN
+        sync: false
+      - key: WEBAPP_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: ADMIN_IDS
+        sync: false
+      - key: SUPPORT_CONTACT
+        sync: false

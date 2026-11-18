@@ -1,0 +1,13 @@
+{
+  "name": "shawarma-empire",
+  "version": "1.0.0",
+  "description": "Тайкун для Telegram Mini App с покупками за Stars",
+  "type": "module",
+  "private": true,
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node server/index.js",
+    "test": "node --test",
+    "simulate": "node scripts/simulate.js"
+  }
+}
